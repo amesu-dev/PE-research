@@ -43,7 +43,7 @@ int main(int argc, char** argv) {
     long rva_import_table = coff_header->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].VirtualAddress;
     PIMAGE_SECTION_HEADER section = find_nearest_section(IMAGE_FIRST_SECTION(coff_header), sizeof(IMAGE_SECTION_HEADER), rva_import_table);
     printf("Import section: %s\n", &section->Name);
-    
+
     // Raw relative address (in file address space)
     long rra_import_table = rva_import_table - section->VirtualAddress + section->PointerToRawData;
 
@@ -57,11 +57,16 @@ int main(int argc, char** argv) {
         p_target += 1
     ) {
         char* name_ptr = (char*)p_target->Name - rva_import_table + (long)p_import_table;
+        // p_target->OriginalFirstThunk -> IMAGE_THUNK_DATA64 -> IMAGE_IMPORT_BY_NAME
+        PIMAGE_THUNK_DATA64 p_thunk = (PIMAGE_THUNK_DATA64)(p_target->OriginalFirstThunk - rva_import_table + (long)p_import_table);
+        PIMAGE_IMPORT_BY_NAME p_import_by_name = (PIMAGE_IMPORT_BY_NAME)(p_thunk->u1.AddressOfData - rva_import_table + (long)p_import_table);
 
         printf("Found import at %p: %s\n", p_target, name_ptr);
+        printf("First import (%4x): %s\n", p_import_by_name->Hint, &p_import_by_name->Name);
     }
 
     //// --------------------------
+    // 
 
 
     printf("Process successed!\n");
