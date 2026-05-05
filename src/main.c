@@ -6,7 +6,7 @@
 #include <winnt.h>
 
 #include "utils.h"
-
+#include "pe.h"
 
 
 int main(int argc, char** argv) {
@@ -15,54 +15,43 @@ int main(int argc, char** argv) {
         return 1;
     }
 
-    void* fcontext;
-    bool ok = load_file(argv[1], &fcontext);
-    if(!ok) return 1;
-
-    PIMAGE_DOS_HEADER dos_header = (PIMAGE_DOS_HEADER)fcontext;
-    
-    printf("Entry: %2s\n", &dos_header->e_magic);
-    printf("%s\n", (char*)fcontext);
-
-    if(dos_header->e_magic != IMAGE_DOS_SIGNATURE) {
-        printf("That's not an executable file!\n");
+    struct FILE_INFO file_info;
+    int code = parse_file(argv[1], &file_info);
+    if (code == MEMORY_NOT_ENOUGH) {
+        printf("ERR: File too big");
         return 1;
-    }
-
-    PIMAGE_NT_HEADERS64 coff_header = (PIMAGE_NT_HEADERS64)((ULONG_PTR)dos_header + dos_header->e_lfanew);
-    printf("Entry: %2s\n", coff_header);
-
-    if (coff_header->Signature != IMAGE_NT_SIGNATURE) {
-        printf("That's not a PE file!\n");
+    } else if (code == WRONG_FILE_FORMAT) {
+        printf("ERR: File wrong format");
         return 1;
-    }
+    } 
+    printf("Entry: %2s\n", &file_info.dos_header->e_magic);
+    printf("Entry: %2s\n", file_info.coff_header);
 
     //// --------------------------
     //// Import table
-    // Virtual address (in exe memory space)
-    long rva_import_table = coff_header->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].VirtualAddress;
-    PIMAGE_SECTION_HEADER section = find_nearest_section(IMAGE_FIRST_SECTION(coff_header), sizeof(IMAGE_SECTION_HEADER), rva_import_table);
-    printf("Import section: %s\n", &section->Name);
 
-    // Raw relative address (in file address space)
-    long rra_import_table = rva_import_table - section->VirtualAddress + section->PointerToRawData;
-
-    // Pointer to import table loaded in CURRENT memory space 
-    PIMAGE_IMPORT_DESCRIPTOR p_import_table = (PIMAGE_IMPORT_DESCRIPTOR)((long)fcontext + rra_import_table);
-    printf("Import table address: %p\n", p_import_table);
+    struct IMPORT_TABLE_INFO import_info;
+    get_import_table(&file_info, &import_info);
+    
+    printf("Import table address: %p\n", import_info.ptr);
 
     for (
-        PIMAGE_IMPORT_DESCRIPTOR p_target = p_import_table;
-        !is_zeroed(p_target, sizeof(IMAGE_IMPORT_DESCRIPTOR));
-        p_target += 1
+        PIMAGE_IMPORT_DESCRIPTOR p_entry = import_info.ptr;
+        !is_zeroed(p_entry, sizeof(IMAGE_IMPORT_DESCRIPTOR));
+        p_entry += 1
     ) {
-        char* name_ptr = (char*)p_target->Name - rva_import_table + (long)p_import_table;
-        // p_target->OriginalFirstThunk -> IMAGE_THUNK_DATA64 -> IMAGE_IMPORT_BY_NAME
-        PIMAGE_THUNK_DATA64 p_thunk = (PIMAGE_THUNK_DATA64)(p_target->OriginalFirstThunk - rva_import_table + (long)p_import_table);
-        PIMAGE_IMPORT_BY_NAME p_import_by_name = (PIMAGE_IMPORT_BY_NAME)(p_thunk->u1.AddressOfData - rva_import_table + (long)p_import_table);
-
-        printf("Found import at %p: %s\n", p_target, name_ptr);
-        printf("First import (%4x): %s\n", p_import_by_name->Hint, &p_import_by_name->Name);
+        char* name_ptr = (char*)p_entry->Name - import_info.rva + (long)import_info.ptr;
+        printf("Found import at %p(0x%-6X): %s\n", p_entry, p_entry->OriginalFirstThunk, name_ptr);
+        // p_entry->OriginalFirstThunk -> IMAGE_THUNK_DATA64 -> IMAGE_IMPORT_BY_NAME
+        
+        for (
+            PIMAGE_THUNK_DATA64 p_thunk = p_entry->OriginalFirstThunk - import_info.rva + (long)import_info.ptr;
+            !is_zeroed(p_thunk, sizeof(IMAGE_THUNK_DATA64));
+            p_thunk += 1
+        ) {
+            PIMAGE_IMPORT_BY_NAME p_import_by_name = (PIMAGE_IMPORT_BY_NAME)(p_thunk->u1.AddressOfData - import_info.rva + (long)import_info.ptr);
+            printf("\t (%4X): %s\n", p_thunk->u1.AddressOfData, &p_import_by_name->Name);
+        }
     }
 
     //// --------------------------

@@ -14,4 +14,3 @@ inline bool load_file(char* path, void** o_context);
 // ---------------------
 // Windows NT
 PIMAGE_SECTION_HEADER find_nearest_section(PIMAGE_SECTION_HEADER first, int count, ULONG_PTR va);
-

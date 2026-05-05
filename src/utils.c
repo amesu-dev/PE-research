@@ -46,11 +46,11 @@ inline bool load_file(char* path, void** o_context) { // Load file to memory
     long long size = ftell(file);
 
     if (size > 32 * 1024 * 1024) {
-        printf("File too big\n");
         return 0;
     }
 
     *o_context = malloc(size * sizeof(char));
+    if (!o_context) return 0;
 
     rewind(file);
     fread(*o_context, 1, size, file); 
